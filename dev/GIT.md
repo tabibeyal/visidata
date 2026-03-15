@@ -107,6 +107,8 @@ By default, commit to **develop** unless explicitly working in another branch on
 
 Run `dev/test-all.sh` locally before pushing. After creating a PR, check CI status with `gh pr checks` and fix any failures before moving on.
 
+During interactive iteration with Saul, commit locally but don't push until the feature is stable. Repeated force-pushes spam the GitHub issue/PR timeline with push events.
+
 ### Documentation
 
 Update docs in the same commit as the code change, not as a separate follow-up commit. Check `docs/README.md` for which files to update.

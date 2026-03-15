@@ -108,6 +108,10 @@ def my_vd_method(vd): ...
 - Use `wrapply(func, args)` instead of try/except when wrapping into `TypedExceptionWrapper`
 - Fail fast when user-configured resources can't load — don't silently fall back.
 
+## Keyword Arguments
+- When passing `**kwargs` through a call chain, pop keys that you also pass explicitly — otherwise `func(key=val, **kwargs)` raises `TypeError: got multiple values`.
+- When assigning to a closure variable in a nested function, add `nonlocal` — Python treats any assignment as creating a new local.
+
 ## Documentation
 - Always add `# rowdef:` comment above sheet classes
 - Docstrings on classes (single-quoted) and methods

@@ -58,23 +58,33 @@ def inputPalette(sheet, prompt, items,
                  value_key='key',
                  formatter=lambda m, item, trigger_key: f'{trigger_key} {item}',
                  multiple=False,
+                 freeform=False,
                  x=0, y=0, w=0, h=0,
                  **kwargs):
+    caller_updater = kwargs.pop('updater', lambda val: None)
+    caller_bindings = kwargs.pop('bindings', {})
+    caller_completer = kwargs.pop('completer', None)
+    input_rows = kwargs.pop('_input_rows', 1)  # number of input field rows to avoid
+
     if not vd.wantsHelp('cmdpalette'):
+        completer = caller_completer or CompleteKey(sorted(item[value_key] for item in items))
         return vd.input(prompt,
-                completer=CompleteKey(sorted(item[value_key] for item in items)),
+                completer=completer,
+                updater=caller_updater, bindings=caller_bindings,
                 **kwargs)
 
-    bindings = dict()
+    bindings = dict(caller_bindings)
 
     #state variables for navigating display of matches
     prev_value = None
     tabitem = -1
-    offset = 0
+    offset = -1 if freeform else 0
+    scroll_locked = False
     def reset_display():
-        nonlocal tabitem, offset
+        nonlocal tabitem, offset, scroll_locked
         tabitem = -1
-        offset = 0
+        offset = -1 if freeform else 0  # -1 = anchor at bottom
+        scroll_locked = False
 
     def tab(n, nitems):
         nonlocal tabitem
@@ -82,7 +92,8 @@ def inputPalette(sheet, prompt, items,
         tabitem = (tabitem + n) % nitems
 
     def _draw_palette(value):
-        nonlocal prev_value, h, w
+        nonlocal prev_value, h, w, offset, tabitem
+        caller_updater(value)
         words = value.split()
         if value != prev_value:
             reset_display()
@@ -101,13 +112,24 @@ def inputPalette(sheet, prompt, items,
 
         unuseditems = [item for item in items if item[value_key] not in finished_words]
 
-        matches = vd.fuzzymatch(unuseditems, unfinished_words)
-
         h = h or sheet.windowHeight
         w = w or min(100, sheet.windowWidth)
         nitems = min(h-3, sheet.options.disp_cmdpal_max)
         if nitems <= 0:
             return None
+
+        # in freeform mode, detect history navigation (exact match) vs user typing
+        match_idx = -1
+        if freeform and value:
+            match_idx = next((idx for idx, item in enumerate(unuseditems) if item[value_key] == value), -1)
+            if match_idx >= 0:
+                unfinished_words = []  # show ordered list, not fuzzy results
+
+        matches = vd.fuzzymatch(unuseditems, unfinished_words)
+
+        if freeform and matches:  # preserve original item order for history
+            item_order = {id(item): idx for idx, item in enumerate(items)}
+            matches = sorted(matches, key=lambda m: item_order.get(id(m.match), 0))
 
         useditems = []
         palrows = []
@@ -130,6 +152,20 @@ def inputPalette(sheet, prompt, items,
                 for item in favitems[offset-len(palrows):offset+nitems-len(palrows)]:
                     palrows.append((None, item))
                 n_results += len(favitems)
+
+        if match_idx >= 0 and not scroll_locked:  # scroll to and highlight the matched history entry
+            total = len(unuseditems)
+            if offset < 0:  # initial: anchor at bottom
+                offset = max(0, total - nitems)
+            if match_idx < offset:  # hit the top edge
+                offset = match_idx
+            elif match_idx >= offset + nitems:  # hit the bottom edge
+                offset = match_idx - nitems + 1
+            tabitem = match_idx - offset
+        elif offset < 0:  # anchor at bottom (most recent visible)
+            total = len(matches) if unfinished_words else len(unuseditems)
+            offset = max(0, total - nitems)
+
         read_matches(offset)
 
         def change_page(dir=+1):
@@ -143,10 +179,26 @@ def inputPalette(sheet, prompt, items,
 
         navailitems = min(len(palrows), nitems)
 
-        bindings['Tab'] = lambda *args: tab(1, navailitems) or args
-        bindings['Shift+Tab'] = lambda *args: tab(-1, navailitems) or args
-        bindings['PgUp'] = lambda *args: (change_page(-1) and read_matches(offset)) or args
-        bindings['PgDn'] = lambda *args: (change_page(+1) and read_matches(offset)) or args
+        if not freeform:
+            bindings['Tab'] = lambda *args: tab(1, navailitems) or args
+            bindings['Shift+Tab'] = lambda *args: tab(-1, navailitems) or args
+
+        if freeform:
+            def _pgup(*args):
+                nonlocal scroll_locked
+                change_page(-1)
+                scroll_locked = True
+                return args
+            def _pgdn(*args):
+                nonlocal scroll_locked
+                change_page(+1)
+                scroll_locked = True
+                return args
+            bindings['PgUp'] = _pgup
+            bindings['PgDn'] = _pgdn
+        else:
+            bindings['PgUp'] = lambda *args: (change_page(-1) and read_matches(offset)) or args
+            bindings['PgDn'] = lambda *args: (change_page(+1) and read_matches(offset)) or args
         for numkey in '1234567890':
             bindings.pop(numkey, None)
 
@@ -154,17 +206,23 @@ def inputPalette(sheet, prompt, items,
             palrows.append((None, None))
 
         if not navailitems:
-            def _enter(v, i):
-                raise EscapeException(f'no choice matching {v}')
-            bindings['Enter'] = _enter
+            if freeform:
+                bindings.pop('Enter', None)
+            else:
+                def _enter(v, i):
+                    raise EscapeException(f'no choice matching {v}')
+                bindings['Enter'] = _enter
             bindings.pop(' ', None)
         pal_cattr = colors.get_color('color_cmdpalette')
-        vd.drawBox(sheet._scr, x, y+h-nitems-3, w, nitems+2, pal_cattr, bottom=False)
+        if freeform:
+            vd.drawBox(sheet._scr, x, y+h-nitems-input_rows-1, w, nitems+1, pal_cattr, bottom=False)
+        else:
+            vd.drawBox(sheet._scr, x, y+h-nitems-3, w, nitems+2, pal_cattr, bottom=False)
 
         used_triggers = set()
         for i, (m, item) in enumerate(palrows):
             trigger_key = ''
-            if tabitem >= 0 and item:
+            if not freeform and tabitem >= 0 and item:
                 tkey = f'{i+1}'[-1]
                 if tkey not in used_triggers:
                     trigger_key = tkey
@@ -176,13 +234,17 @@ def inputPalette(sheet, prompt, items,
             if tabitem < 0 and palrows:
                 _ , topitem = palrows[0]
                 if topitem:
-                    if multiple:
+                    if freeform:
+                        bindings.pop('Enter', None)
+                    elif multiple:
                         bindings['Enter'] = partial(accept_input_if_subset, value=topitem[value_key])
                         bindings['Space'] = partial(add_to_input, value=topitem[value_key])
                     else:
                         bindings['Enter'] = partial(accept_input, value=topitem[value_key])
             elif item and i == tabitem:
-                if multiple:
+                if freeform:
+                    bindings.pop('Enter', None)
+                elif multiple:
                     bindings['Enter'] = partial(accept_input_if_subset, value=item[value_key])
                     bindings['Space'] = partial(add_to_input, value=item[value_key])
                 else:
@@ -191,15 +253,17 @@ def inputPalette(sheet, prompt, items,
 
             match_summary = formatter(m, item, trigger_key) if item else ' '
 
-            clipdraw(sheet._scr, y+h-nitems-2+i, x+1, match_summary, attr, w=w-2)
-        attr = colors.color_cmdpalette
-        instr = 'Press [:keystrokes]PgUp/PgDn[/] to scroll items, [:keystrokes]Tab/Shift+Tab[/] then [:keystrokes]Enter[/] to choose, [:keystrokes]Esc[/] to cancel.'
-        if dispwidth(instr) < w-2:
-            clipdraw(sheet._scr, h-2, x+1, instr, attr, w=w-2)
+            content_y = y+h-nitems-input_rows+i if freeform else y+h-nitems-2+i
+            clipdraw(sheet._scr, content_y, x+1, match_summary, attr, w=w-2)
+        if not freeform:
+            attr = colors.color_cmdpalette
+            instr = 'Press [:keystrokes]PgUp/PgDn[/] to scroll items, [:keystrokes]Tab/Shift+Tab[/] then [:keystrokes]Enter[/] to choose, [:keystrokes]Esc[/] to cancel.'
+            if dispwidth(instr) < w-2:
+                clipdraw(sheet._scr, h-2, x+1, instr, attr, w=w-2)
 
         return None
 
-    completer = CompleteKey(sorted(item[value_key] for item in items))
+    completer = caller_completer or CompleteKey(sorted(item[value_key] for item in items))
     return vd.input(prompt,
             completer=completer,
             updater=_draw_palette,
@@ -263,3 +327,49 @@ def exec_longname(sheet, longname):
 
 vd.addCommand('Space', 'exec-longname', 'exec_longname(inputLongname())', 'execute command by its longname')
 vd.addCommand('zSpace', 'exec-longname-simple', 'exec_longname(inputLongnameSimple())', 'execute command by its longname (without command palette)')
+
+
+vd.help_input_history = '''# Input History
+
+Type to fuzzy search through previous inputs.
+`Up`/`Down` to cycle through history.
+`Down` past the newest restores your original text.
+`Enter` to accept.
+'''
+
+
+def _history_palette_hook(vd, prompt, type=None, history=[], **kwargs):
+    'Show input history in a fuzzy palette when history is available.'
+    if getattr(vd, '_in_history_palette', False):
+        return None
+    if not type or not history or not vd.cursesEnabled:
+        return None
+    if not vd.wantsHelp('cmdpalette'):
+        return None
+
+    sheet = vd.activeSheet
+
+    def _fmt_history(match, item, trigger_key):
+        if not item:
+            return ' '
+        formatted = match.formatted.get('input', item.input) if match else item.input
+        r = f'  {trigger_key + " " if trigger_key else "  "}{formatted}'
+        return r
+
+    items = [AttrDict(input=h) for h in history]  # oldest first = top, newest = bottom
+    kwargs.pop('help', None)
+
+    vd._in_history_palette = True
+    try:
+        return sheet.inputPalette(prompt, items, value_key='input',
+                                  formatter=_fmt_history,
+                                  freeform=True,
+                                  help=vd.help_input_history,
+                                  type=type,
+                                  history=history,
+                                  **kwargs)
+    finally:
+        vd._in_history_palette = False
+
+
+vd._input_hooks.append(_history_palette_hook)

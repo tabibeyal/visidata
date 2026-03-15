@@ -21,6 +21,7 @@ class AcceptInput(Exception):
 
 vd._injectedInput = None  # for vd.injectInput
 vd.editCellBindings = {}  # user-customizable bindings for cell editing; use acceptThenFunc() to define
+vd._input_hooks = []  # list of func(vd, **kwargs) that return input value or None to fall through
 
 
 @VisiData.api
@@ -505,6 +506,7 @@ def inputMultiple(vd, updater=lambda val: None, record=True, **kwargs):
                                              attr=colors.color_edit_cell,
                                              updater=_drawPrompt,
                                              record=False,
+                                             _input_rows=len(keys),
                                              bindings={
                 'Shift+Tab':   change_input(-1),
                 'Tab':     change_input(+1),
@@ -568,6 +570,14 @@ def input(vd, prompt, type=None, defaultLast=False, history=[], dy=0, attr=None,
 
     if not history:
         history = list(vd.inputHistory.setdefault(type, {}).keys())
+
+    for hook in vd._input_hooks:
+        ret = hook(vd, prompt=prompt, type=type, defaultLast=defaultLast,
+                   history=history, dy=dy, attr=attr, updater=updater, **kwargs)
+        if ret is not None:
+            return ret
+
+    kwargs.pop('_input_rows', None)  # consumed by hooks only
 
     y = sheet.windowHeight-dy-1
     promptlen = dispwidth(prompt)
