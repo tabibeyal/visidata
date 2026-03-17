@@ -580,6 +580,7 @@ def input(vd, prompt, type=None, defaultLast=False, history=[], dy=0, attr=None,
             return ret
 
     kwargs.pop('_input_rows', None)  # consumed by hooks only
+    kwargs.pop('_history_palette', None)  # consumed by hooks only
 
     y = sheet.windowHeight-dy-1
     promptlen = dispwidth(prompt)

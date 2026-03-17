@@ -8,6 +8,7 @@ vd._in_history_palette = False
 def _history_palette_hook(vd, prompt, type=None, history=[], updater=lambda v: None, bindings={}, **kwargs):
     '''Input hook: show fuzzy history palette when input has previous history.'''
     _input_rows = kwargs.pop('_input_rows', 0) or 0
+    if not kwargs.pop('_history_palette', True): return None
 
     if not type:                        return None
     if not history:                     return None
