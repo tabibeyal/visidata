@@ -25,9 +25,10 @@ def _history_palette_hook(vd, prompt, type=None, history=[], updater=lambda v: N
     orig = ['']         # saved input before history navigation
 
     pal_bindings = dict(bindings)
+    input_height = max(_input_rows, 1)  # at least 1 row for the prompt
 
     def _nvis():
-        return max(1, min(sheet.windowHeight - 3 - _input_rows, vd.options.disp_cmdpal_max))
+        return max(1, min(sheet.windowHeight - 2 - input_height, vd.options.disp_cmdpal_max))
 
     def _bounds():
         'Clamp cursor and top, then enforce cursor visibility (spec rules).'
@@ -139,10 +140,10 @@ def _history_palette_hook(vd, prompt, type=None, history=[], updater=lambda v: N
 
         visible = display[0][vis_start:vis_start + ndisplay]
         if not visible: return
-        box_y = sheet.windowHeight - ndisplay - 2 - _input_rows
+        box_y = sheet.windowHeight - ndisplay - input_height - 1
         if box_y < 0: return
         pal_cattr = colors.get_color('color_cmdpalette')
-        vd.drawBox(scr, 0, box_y, w, ndisplay + 2, pal_cattr, bottom=False)
+        vd.drawBox(scr, 0, box_y, w, ndisplay + 1, pal_cattr, bottom=False)
         for idx, (text, raw) in enumerate(visible):
             if idx == highlight:
                 clipdraw(scr, box_y + 1 + idx, 1, f'> {text}', colors.color_menu_spec, w=w - 2)
